@@ -1,0 +1,54 @@
+name: Build WIMU Downloader
+on:
+  push: { branches: [ main ] }
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build-mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python universal2 (Apple Silicon + Intel)
+        run: |
+          curl -sSLo python.pkg https://www.python.org/ftp/python/3.12.7/python-3.12.7-macos11.pkg
+          sudo installer -pkg python.pkg -target /
+          echo "PY=/Library/Frameworks/Python.framework/Versions/3.12/bin/python3" >> $GITHUB_ENV
+      - run: $PY -m pip install pyinstaller==6.11.1
+      - name: Build .app
+        run: |
+          $PY -m PyInstaller --noconfirm --windowed --onedir --target-arch universal2 \
+            --osx-bundle-identifier com.wimu.downloader.usb \
+            --icon icon.icns --add-data "icon.ico:." \
+            --name "WIMU_Downloader" wimu_downloader.py
+          codesign --force --deep --sign - "dist/WIMU_Downloader.app"
+          ditto -c -k --sequesterRsrc --keepParent "dist/WIMU_Downloader.app" WIMU_Downloader_Mac.zip
+      - uses: actions/upload-artifact@v4
+        with: { name: mac, path: WIMU_Downloader_Mac.zip }
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pyinstaller==6.11.1
+      - name: Build .exe
+        run: |
+          python -m PyInstaller --noconfirm --windowed --onefile --icon icon.ico --add-data "icon.ico;." --name "WIMU_Downloader" wimu_downloader.py
+          Move-Item "dist/WIMU_Downloader.exe" "WIMU_Downloader_Windows.exe"
+      - uses: actions/upload-artifact@v4
+        with: { name: windows, path: WIMU_Downloader_Windows.exe }
+  release:
+    needs: [ build-mac, build-windows ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v2.2.${{ github.run_number }}
+          name: WIMU Downloader v2.2.${{ github.run_number }}
+          make_latest: true
+          files: |
+            artifacts/mac/WIMU_Downloader_Mac.zip
+            artifacts/windows/WIMU_Downloader_Windows.exe
